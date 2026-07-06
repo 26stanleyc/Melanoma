@@ -5,47 +5,52 @@ import shutil
 
 # Read sample sheets
 rna_samples = pd.read_csv('/Users/stanleychen/git/Melanoma/data/RNA-seq/gdc_sample_sheet.2024-12-27.tsv', sep='\t')
-rppa_samples = pd.read_csv('/Users/stanleychen/git/Melanoma/data/RPPA/gdc_sample_sheet.2024-12-27.tsv', sep='\t')
+mirna_samples = pd.read_csv('/Users/stanleychen/git/Melanoma/data/miRNA/gdc_sample_sheet.2025-02-03.tsv', sep='\t')
 
 # Extract Case IDs
 rna_case_ids = set(rna_samples['Case ID'])
-rppa_case_ids = set(rppa_samples['Case ID'])
+mirna_case_ids = set(id.split(',')[0].strip() for id in mirna_samples['Case ID'])
 
 # Find matching Case IDs
-matching_case_ids = rna_case_ids.intersection(rppa_case_ids)
+matching_case_ids = rna_case_ids.intersection(mirna_case_ids)
+print(f"Matching Case IDs:", len(matching_case_ids))
 
-# print(f"Matching Case IDs: {matching_case_ids}")
-
-# Function to find and copy matched files
-def process_files(rna_samples, rppa_samples, case_ids):
+def process_files(rna_samples, mirna_samples, case_ids):
     for case_id in case_ids:
         rna_row = rna_samples[rna_samples['Case ID'] == case_id]
-        rppa_row = rppa_samples[rppa_samples['Case ID'] == case_id]
-        if not rna_row.empty and not rppa_row.empty:
+        mirna_row = mirna_samples[mirna_samples['Case ID'] == case_id]
+        
+        if not rna_row.empty and not mirna_row.empty:
             rna_file_name = rna_row['File Name'].values[0]
-            rppa_file_name = rppa_row['File Name'].values[0]
+            mirna_file_name = mirna_row['File Name'].values[0]
+            
             rna_file_name = rna_file_name.replace('.tsv', '_processed.tsv')
-            rppa_file_name = rppa_file_name.replace('.tsv', '_processed.tsv')
-            rna_file_path = glob.glob(os.path.join('RNA-seq_processed', '**', rna_file_name), recursive=True)
-            rppa_file_path = glob.glob(os.path.join('RPPA_processed', '**', rppa_file_name), recursive=True)
-            if rna_file_path and rppa_file_path:
-                rna_file_path = rna_file_path[0]
-                rppa_file_path = rppa_file_path[0]
-                # Create a new folder for this Case ID
-                case_folder = os.path.join('combined_data', case_id)
+            mirna_file_name = mirna_file_name.replace('.tsv', '_processed.tsv')
+            
+            # Find the files
+            rna_files = glob.glob(os.path.join('RNA-seq_processed', '**', rna_file_name), recursive=True)
+            mirna_files = glob.glob(os.path.join('miRNA_processed', '**', mirna_file_name), recursive=True)
+            
+            # Check if both files were found
+            if rna_files and mirna_files:
+                rna_file_path = rna_files[0]  # Take the first match
+                mirna_file_path = mirna_files[0]  # Take the first match
+                
+                # Create case folder
+                case_folder = os.path.join('combined_data_no_RPPA', case_id)
                 os.makedirs(case_folder, exist_ok=True)
-
-                # Copy RNA-seq file
+                
+                # Copy files
                 rna_dest = os.path.join(case_folder, f"{case_id}_RNA-seq.tsv")
-                shutil.copy2(rna_file_path, rna_dest)
-
-                # Copy RPPA file
-                rppa_dest = os.path.join(case_folder, f"{case_id}_RPPA.tsv")
-                shutil.copy2(rppa_file_path, rppa_dest)
-
-                print(f"Created folder and copied files for Case ID: {case_id}")
+                mirna_dest = os.path.join(case_folder, f"{case_id}_miRNA.tsv")
+                
+                try:
+                    shutil.copy2(rna_file_path, rna_dest)
+                    shutil.copy2(mirna_file_path, mirna_dest)
+                    print(f"Created folder and copied files for Case ID: {case_id}")
+                except Exception as e:
+                    print(f"Error processing Case ID {case_id}: {str(e)}")
 
 # Process files
-process_files(rna_samples, rppa_samples, matching_case_ids)
-
+process_files(rna_samples, mirna_samples, matching_case_ids)
 print("Finished processing and organizing files.")

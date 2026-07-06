@@ -3,7 +3,7 @@ import os
 import glob
 
 # Set the path to your main directory
-main_dir = '/Users/stanleychen/git/Melanoma/data/combined_data'
+main_dir = '/Users/stanleychen/git/Melanoma/data/combined_data_no_RPPA'
 
 # Initialize an empty dictionary to store the data
 data = {}
@@ -13,7 +13,7 @@ for patient_dir in os.listdir(main_dir):
     patient_path = os.path.join(main_dir, patient_dir)
     if os.path.isdir(patient_path):
         # Look for the RPPA file
-        rna_seq_file = glob.glob(os.path.join(patient_path, '*_RNA-seq.tsv'))
+        rna_seq_file = glob.glob(os.path.join(patient_path, '*_miRNA.tsv'))
         if rna_seq_file:
             # Extract patient ID from the filename
             patient_id = os.path.basename(rna_seq_file[0]).split('_')[0]
@@ -37,4 +37,4 @@ result_df = pd.DataFrame.from_dict(data, orient='index')
 print(result_df.head())
 
 # Save the DataFrame to a CSV file
-result_df.to_csv('combined_RNA-seq_data.csv')
+result_df.to_csv('combined_miRNA-seq_data.csv')

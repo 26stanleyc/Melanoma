@@ -1,16 +1,11 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from collections import Counter
 
-def analyze_patient_data(input_path):
+def analyze_patient_data(input_path, output_path):
     """
-    Read and analyze patient data with proper header handling.
-    
-    Parameters:
-    input_path (str): Path to the clinical data file
-    
-    Returns:
-    pd.DataFrame: DataFrame with patient barcodes, survival times, and tumor status
+    Read and analyze patient data with OBS calculation and survival time filtering.
     """
     try:
         # Read all lines first
@@ -21,48 +16,71 @@ def analyze_patient_data(input_path):
         first_header = lines[0].split('bcr_patient_uuid')[0] + 'bcr_patient_uuid' + lines[0].split('bcr_patient_uuid')[1]
         headers = first_header.strip().split('\t')
         
-        # Read the data, skipping the extra header rows
+        # Make headers unique
+        unique_headers = []
+        seen_counts = {}
+        for header in headers:
+            if header in seen_counts:
+                seen_counts[header] += 1
+                unique_headers.append(f"{header}_{seen_counts[header]}")
+            else:
+                seen_counts[header] = 0
+                unique_headers.append(header)
+        
+        # Read the data with unique headers
         data = pd.read_csv(input_path,
                           sep='\t',
-                          names=headers,
-                          skiprows=[1, 2])  # Skip the second and third header rows
+                          names=unique_headers,
+                          skiprows=[1, 2])
         
-        # Create empty lists to store results
         results = []
-        
         for _, row in data.iterrows():
             try:
-                # Get patient barcode
                 barcode = row['bcr_patient_barcode']
                 
-                # Calculate survival time
-                survival_time = None
-                survival_source = None
+                # Get last contact days (OBS)
+                try:
+                    obs_days = pd.to_numeric(row['last_contact_days_to'], errors='coerce')
+                except (ValueError, TypeError):
+                    obs_days = None
                 
-                # Check for death_days_to and last_contact_days_to
-                if pd.notna(row['death_days_to']):
-                    survival_time = row['death_days_to']
-                    survival_source = 'death'
-                elif pd.notna(row['last_contact_days_to']):
-                    survival_time = row['last_contact_days_to']
-                    survival_source = 'last_followup'
+                # Get death days for event status
+                try:
+                    death_days = pd.to_numeric(row['death_days_to'], errors='coerce')
+                    # If death_days exists and is less than or equal to last contact days,
+                    # use death_days as the observation time
+                    if pd.notna(death_days):
+                        if pd.isna(obs_days) or death_days <= obs_days:
+                            obs_days = death_days
+                except (ValueError, TypeError):
+                    death_days = None
                 
-                # Get tumor status
-                tumor_status = row['tumor_status']
-                if pd.isna(tumor_status):
-                    tumor_status = '[Not Available]'
+                # Skip if no valid survival time or negative survival time
+                if pd.isna(obs_days) or obs_days < 0:
+                    continue
+                
+                # Find the stage information
+                stage_columns = ['stage', 'pathologic_stage', 'clinical_stage', 'Stage', 'ajcc_pathologic_tumor_stage']
+                tumor_stage = '[Not Available]'
+                
+                for col in stage_columns:
+                    if col in row.index and pd.notna(row[col]):
+                        stage_value = str(row[col]).strip()
+                        if stage_value not in ['[Not Available]', '[Not Applicable]', '']:
+                            tumor_stage = stage_value
+                            break
                 
                 # Store results
                 results.append({
                     'patient_barcode': barcode,
-                    'survival_time_days': survival_time,
-                    'survival_time_source': survival_source,
-                    'tumor_status': tumor_status,
-                    'vital_status': row['vital_status']
+                    'obs_days': obs_days,
+                    'tumor_stage': tumor_stage,
+                    'vital_status': row['vital_status'],
+                    'event': 1 if row['vital_status'] == 'Dead' else 0
                 })
                 
             except Exception as e:
-                print(f"Error processing row: {e}")
+                print(f"Error processing row for patient {barcode}: {e}")
                 continue
         
         # Convert to DataFrame and sort by barcode
@@ -70,50 +88,49 @@ def analyze_patient_data(input_path):
         if not results_df.empty:
             results_df = results_df.sort_values('patient_barcode')
             
-            # Print the first few rows for verification
-            print("\nFirst few rows of processed data:")
-            print(results_df.head())
+            # Additional filtering to ensure no negative or missing values
+            initial_count = len(results_df)
+            results_df = results_df.dropna(subset=['obs_days'])
+            results_df = results_df[results_df['obs_days'] > 0]
+            
+            print(f"\nFiltering Results:")
+            print(f"Initial patients: {initial_count}")
+            print(f"Patients after removing missing/negative survival times: {len(results_df)}")
+            print(f"Removed {initial_count - len(results_df)} patients")
+            
+            # Save filtered results
+            results_df.to_csv(output_path, index=False)
+            print(f"\nSaved filtered results to: {output_path}")
+            
+            # Print summary statistics
+            print("\nAnalysis Results:")
+            print(f"Total patients in final dataset: {len(results_df)}")
+            
+            print("\nTumor Stage Distribution:")
+            print(results_df['tumor_stage'].value_counts())
+            
+            print("\nVital Status Distribution:")
+            print(results_df['vital_status'].value_counts())
+            
+            valid_obs = results_df['obs_days']
+            print(f"\nObserved Survival Interval (OBS) Statistics (in days):")
+            print(f"Mean: {valid_obs.mean():.2f}")
+            print(f"Median: {valid_obs.median():.2f}")
+            print(f"Min: {valid_obs.min():.2f}")
+            print(f"Max: {valid_obs.max():.2f}")
+            
+            event_rate = results_df['event'].mean() * 100
+            print(f"\nEvent rate: {event_rate:.1f}%")
         
         return results_df
         
     except Exception as e:
         print(f"Error processing file: {str(e)}")
-        # Print available columns for debugging
-        if 'data' in locals():
-            print("\nAvailable columns:")
-            print(data.columns.tolist())
         return None
 
-# Define input path and run analysis
-input_data = 'clinical_data.txt'  # Replace with your actual path
-results = analyze_patient_data(input_data)
+# Define paths
+input_path = '/Users/stanleychen/git/Melanoma/clinical_data/nationwidechildrens.org_clinical_patient_skcm.txt'
+output_path = '/Users/stanleychen/git/Melanoma/afpipeline/patient_survival_obs.csv'
 
-if results is not None and not results.empty:
-    # Save results to CSV
-    results.to_csv('patient_survival_analysis.csv', index=False)
-    
-    print("\nAnalysis Results:")
-    print(f"Total patients processed: {len(results)}")
-    
-    print("\nTumor Status Distribution:")
-    print(results['tumor_status'].value_counts())
-    
-    print("\nVital Status Distribution:")
-    print(results['vital_status'].value_counts())
-    
-    print("\nSurvival Time Source Distribution:")
-    print(results['survival_time_source'].value_counts())
-    
-    # Calculate mean survival time only for non-null values
-    valid_survival_times = results['survival_time_days'].dropna()
-    if len(valid_survival_times) > 0:
-        print(f"\nSurvival Time Statistics (in days):")
-        print(f"Mean: {valid_survival_times.mean():.2f}")
-        print(f"Median: {valid_survival_times.median():.2f}")
-        print(f"Min: {valid_survival_times.min():.2f}")
-        print(f"Max: {valid_survival_times.max():.2f}")
-    else:
-        print("\nNo valid survival time data available")
-        
-    # Save detailed results
-    print("\nResults have been saved to 'patient_survival_analysis.csv'")
+# Run analysis
+results = analyze_patient_data(input_path, output_path)

@@ -6,6 +6,24 @@ class MAFParser:
     def __init__(self):
         self.mutation_info = []
         
+    def _extract_patient_barcode(self, full_barcode: str) -> str:
+        """
+        Extract patient-specific portion of TCGA barcode (first three blocks)
+        
+        Args:
+            full_barcode (str): Full TCGA barcode (e.g., TCGA-EE-A3J7-06A-11D-A20D-08)
+            
+        Returns:
+            str: Patient barcode (e.g., TCGA-EE-A3J7)
+        """
+        if pd.isna(full_barcode) or not isinstance(full_barcode, str):
+            return ''
+            
+        parts = full_barcode.split('-')
+        if len(parts) >= 3:
+            return '-'.join(parts[:3])
+        return full_barcode
+    
     def process_directory(self, root_dir: str) -> List[Dict]:
         """
         Walk through directory and process all .maf files (excluding .gz files)
@@ -39,6 +57,7 @@ class MAFParser:
             
             for _, row in missense_df.iterrows():
                 mutation_dict = {
+                    'patient_barcode': self._extract_patient_barcode(row['Tumor_Sample_Barcode']),
                     'gene': row['Hugo_Symbol'],
                     'chromosome': row['Chromosome'],
                     'position': row['Start_Position'],
